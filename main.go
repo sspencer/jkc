@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"github.com/Jeffail/gabs/v2"
 	"io/fs"
-	"log"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,32 +13,56 @@ import (
 
 // print dotted path for each json key
 func main() {
+	if len(os.Args) < 2 {
+		fmt.Fprintln(os.Stderr, "Count all unique JSON key paths in *.json files found in the specified directories\n")
+		fmt.Fprintln(os.Stderr, "USAGE:\n    jkc <dir1> [<dir2> <dir3> ...]")
+		os.Exit(1)
+	}
+
 	countMap := make(map[string]int)
 
-	root, err := os.Getwd()
+	cwd, err := os.Getwd()
 	if err != nil {
 		panic(err)
 	}
-	fileSystem := os.DirFS(root)
+
+	for _, dir := range os.Args[1:] {
+		if dir[0] != os.PathSeparator {
+			dir = filepath.Join(cwd, dir)
+		}
+
+		if stat, err := os.Stat(dir); err == nil && stat.IsDir() {
+			walkDir(dir, countMap)
+		} else {
+			fmt.Fprintf(os.Stderr, "ERROR %q is not a directory\n", dir)
+			os.Exit(1)
+		}
+	}
+
+	prettyPrint(countMap)
+}
+
+// recursively walk directory looking for all *.json files
+func walkDir(dir string, countMap map[string]int) {
+	fileSystem := os.DirFS(dir)
 
 	fs.WalkDir(fileSystem, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			log.Fatal(err)
+			fmt.Fprintln(os.Stderr, err)
 		}
 
 		if d.Type().IsRegular() && strings.HasSuffix(d.Name(), ".json") {
-			if err = countPaths(countMap, path); err != nil {
-				log.Fatal(err)
+			if err = countPaths(filepath.Join(dir, path), countMap); err != nil {
+				fmt.Fprintln(os.Stderr, err)
 			}
 		}
 
 		return nil
 	})
-
-	prettyPrint(countMap)
 }
 
-func countPaths(countMap map[string]int, path string) error {
+// read json file, count unique key paths
+func countPaths(path string, countMap map[string]int) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -62,7 +86,11 @@ func countPaths(countMap map[string]int, path string) error {
 	return nil
 }
 
+// remove array subscripts
+//     FROM: pets.1.name
+//       TO: pets.name
 func normalizeKeyPath(keyPath string) string {
+	fmt.Println(keyPath)
 	keys := strings.Split(keyPath, ".")
 	var newKeys []string
 	for _, key := range keys {
@@ -74,6 +102,7 @@ func normalizeKeyPath(keyPath string) string {
 	return strings.Join(newKeys, ".")
 }
 
+// Sort map keys and align count based on longest key path
 func prettyPrint(m map[string]int) {
 	var maxLenKey int
 	keys := make([]string, 0, len(m))
