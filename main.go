@@ -14,8 +14,8 @@ import (
 // print dotted path for each json key
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "Count all unique JSON key paths in *.json files found in the specified directories\n")
-		fmt.Fprintln(os.Stderr, "USAGE:\n    jkc <dir1> [<dir2> <dir3> ...]")
+		fmt.Fprintf(os.Stderr, "Count all unique JSON key paths in *.json files found in the specified directories\n\n")
+		fmt.Fprintf(os.Stderr, "USAGE:\n    jkc <dir1> [<dir2> <dir3> ...]\n")
 		os.Exit(1)
 	}
 
@@ -90,7 +90,6 @@ func countPaths(path string, countMap map[string]int) error {
 //     FROM: pets.1.name
 //       TO: pets.name
 func normalizeKeyPath(keyPath string) string {
-	fmt.Println(keyPath)
 	keys := strings.Split(keyPath, ".")
 	var newKeys []string
 	for _, key := range keys {
