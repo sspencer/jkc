@@ -1,0 +1,11 @@
+{
+  "pets":
+  [
+    {
+      "name": "Oden",
+      "type": "dog",
+      "bark": true,
+      "speak": true
+    }
+  ]
+}

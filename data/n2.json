@@ -1,0 +1,10 @@
+{
+  "pets":
+  [
+    {
+      "name": "Boo",
+      "type": "dog",
+      "bark": true
+    }
+  ]
+}
