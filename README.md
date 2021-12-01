@@ -21,3 +21,9 @@ pets.[*].meow:             1
 pets.[*].name:             7
 pets.[*].speak:            3
 ```
+
+**NOTE**
+
+You may skip more than one key:
+
+    jkc -v input -v output dir1 dir2 dir3
