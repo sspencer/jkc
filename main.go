@@ -32,7 +32,7 @@ func (i *arrayFlags) Set(value string) error {
 func main() {
 	var skipKeys arrayFlags
 	flag.Var(&skipKeys, "v", "skip this \"key\" (invert match)") // can specify more than once
-	skipIds := flag.Bool("i", false, "skip keys that looks like pushids or uuids")
+	skipIds := flag.Bool("i", false, "skip keys that looks like push ids or uuids")
 
 	flag.Usage = func() {
 		w := flag.CommandLine.Output() // may be os.Stderr - but not necessarily
@@ -62,7 +62,11 @@ func main() {
 		}
 
 		if stat, err := os.Stat(dir); err == nil && stat.IsDir() {
-			walkDir(dir, countMap, opts)
+			err = walkDir(dir, countMap, opts)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "ERROR walking directory %q: %s\n", dir, err)
+				os.Exit(1)
+			}
 		} else {
 			fmt.Fprintf(os.Stderr, "ERROR %q is not a directory\n", dir)
 			os.Exit(1)
@@ -73,10 +77,10 @@ func main() {
 }
 
 // recursively walk directory looking for all *.json files
-func walkDir(dir string, countMap map[string]int, opts cmdParams) {
+func walkDir(dir string, countMap map[string]int, opts cmdParams) error {
 	fileSystem := os.DirFS(dir)
 
-	fs.WalkDir(fileSystem, ".", func(path string, d fs.DirEntry, err error) error {
+	return fs.WalkDir(fileSystem, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
@@ -109,7 +113,7 @@ func countPaths(path string, countMap map[string]int, opts cmdParams) error {
 		return err
 	}
 
-	for keyPath, _ := range flat {
+	for keyPath := range flat {
 		key := normalizeKeyPath(keyPath, opts)
 		if len(key) > 0 {
 			countMap[key]++
