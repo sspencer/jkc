@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/csv"
 	"flag"
 	"fmt"
 	"github.com/Jeffail/gabs/v2"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,6 +18,12 @@ type config struct {
 	skipKeys     []string
 	skipPartials []string
 	skipIds      bool
+}
+
+type countType struct {
+	count int
+	typ3  string // since 'type' is a reserved word
+	dir   string
 }
 
 type arrayFlags []string
@@ -35,6 +43,8 @@ func main() {
 	flag.Var(&skipKeys, "v", "skip this \"key\" (invert match)")                    // can specify more than once
 	flag.Var(&skipPartials, "p", "skip \"key\" with this substring (invert match)") // can specify more than once
 	skipIds := flag.Bool("i", false, "skip keys that looks like push ids or uuids")
+	csvOut := flag.Bool("csv", false, "output in CSV format")
+	tsvOut := flag.Bool("tsv", false, "output in TSV format")
 
 	flag.Usage = func() {
 		w := flag.CommandLine.Output() // may be os.Stderr - but not necessarily
@@ -50,7 +60,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	countMap := make(map[string]int)
+	countMap := make(map[string]countType)
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -75,11 +85,18 @@ func main() {
 		}
 	}
 
-	prettyPrint(countMap)
+	if *csvOut {
+		csvPrint(countMap, ',')
+	} else if *tsvOut {
+		csvPrint(countMap, '\t')
+	} else {
+		prettyPrint(countMap)
+	}
+
 }
 
 // recursively walk directory looking for all *.json files
-func walkDir(dir string, countMap map[string]int, cfg config) error {
+func walkDir(dir string, countMap map[string]countType, cfg config) error {
 	fileSystem := os.DirFS(dir)
 
 	return fs.WalkDir(fileSystem, ".", func(path string, d fs.DirEntry, err error) error {
@@ -88,7 +105,7 @@ func walkDir(dir string, countMap map[string]int, cfg config) error {
 		}
 
 		if d.Type().IsRegular() && strings.HasSuffix(d.Name(), ".json") {
-			if err = countPaths(filepath.Join(dir, path), countMap, cfg); err != nil {
+			if err = countPaths(filepath.Base(dir), filepath.Join(dir, path), countMap, cfg); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
 		}
@@ -98,7 +115,7 @@ func walkDir(dir string, countMap map[string]int, cfg config) error {
 }
 
 // read json file, count unique key paths
-func countPaths(path string, countMap map[string]int, cfg config) error {
+func countPaths(dir, path string, countMap map[string]countType, cfg config) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -115,10 +132,27 @@ func countPaths(path string, countMap map[string]int, cfg config) error {
 		return err
 	}
 
-	for keyPath := range flat {
+	var typ string
+	for keyPath, val := range flat {
+
+		switch val.(type) {
+		case int:
+		case float64:
+			typ = "number"
+		case string:
+			typ = "string"
+		case bool:
+			typ = "boolean"
+		default:
+			typ = "unknown"
+		}
 		key := normalizeKeyPath(keyPath, cfg)
 		if len(key) > 0 {
-			countMap[key]++
+			ct := countMap[key]
+			ct.count++
+			ct.typ3 = typ
+			ct.dir = dir
+			countMap[key] = ct
 		}
 	}
 
@@ -182,19 +216,48 @@ func looksLikeId(key string) bool {
 }
 
 // Sort map keys and align count based on longest key path
-func prettyPrint(m map[string]int) {
-	var maxLenKey int
+func prettyPrint(m map[string]countType) {
+	var maxLenKey, maxLenType int
 	keys := make([]string, 0, len(m))
-	for k := range m {
+	for k, ct := range m {
 		if len(k) > maxLenKey {
 			maxLenKey = len(k)
 		}
+		countLen := len(ct.typ3)
+		if countLen > maxLenType {
+			maxLenType = countLen
+		}
+
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 
 	for _, k := range keys {
-		v := m[k]
-		fmt.Printf("%s:%s %d\n", k, strings.Repeat(" ", maxLenKey-len(k)), v)
+		ct := m[k]
+		fmt.Printf("%s%s  %s%s  %d\n", k, strings.Repeat(" ", maxLenKey-len(k)), ct.typ3, strings.Repeat(" ", maxLenType-len(ct.typ3)), ct.count)
 	}
+}
+
+func sortKeys(m map[string]countType) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func csvPrint(m map[string]countType, separator rune) {
+	keys := sortKeys(m)
+	w := csv.NewWriter(os.Stdout)
+	w.Comma = separator
+	for _, k := range keys {
+		ct := m[k]
+		if err := w.Write([]string{k, ct.typ3, ct.dir, strconv.Itoa(ct.count)}); err != nil {
+			log.Fatalln(err)
+		}
+	}
+
+	w.Flush()
 }
