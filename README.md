@@ -16,6 +16,8 @@ directories to count all the unique key paths found in *.json files.
 USAGE:
   jkc <dir1> [<dir2> <dir3> ...]
   -i    skip keys that looks like pushids or uuids
+  -p value
+    	skip "key" with this substring (invert match)  
   -v value
         skip this "key" (invert match)
 ```
@@ -24,11 +26,14 @@ For the included example `data/` directory:
 
 ```
 $ jkc -i -v type data
-pets.[*].<id>.animal.name: 2
-pets.[*].bark:             6
-pets.[*].meow:             1
-pets.[*].name:             7
-pets.[*].speak:            3
+pets[*].<id>.animal.name:   2
+pets[*].<id>.animal.type.*: 2
+pets[*].<id>.type.*:        2
+pets[*].bark:               6
+pets[*].meow:               1
+pets[*].name:               7
+pets[*].speak:              3
+pets[*].type.*:             7
 ```
 
 ## Notes
