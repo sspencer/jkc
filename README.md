@@ -24,6 +24,7 @@ USAGE:
   -v value 	skip this "key" (invert match)```
 ```
 
+```
 $ jkc -i -v type testdata
 pets[*].<id>.animal.name  string   2
 pets[*].<id>.animal.type  string   2
