@@ -10,31 +10,29 @@ directories to count unique key paths found in *.json files.
 3. Keys may be excluded to reduce noise with `-v key` flag
 4. IDs (UUID and PushIds) may be rolled up with the `-i` flag which reduces them to `<id>`
 5. Partial keys can be ignored with the `-p` flag
- 
+6. Reports with directory crawled may be printed with -csv or -tsv flags.
+
 ## Usage 
 
 ```
 USAGE:
   jkc <dir1> [<dir2> <dir3> ...]
-  -i    skip keys that looks like pushids or uuids
-  -p value
-    	skip "key" with this substring (invert match)  
-  -v value
-        skip this "key" (invert match)
+  -csv 	    output in CSV format
+  -i	    skip keys that looks like push ids or uuids
+  -p value 	skip "key" with this substring (invert match)
+  -tsv    	output in TSV format
+  -v value 	skip this "key" (invert match)```
 ```
 
-For the included example `testdata/` directory:
-
-```
 $ jkc -i -v type testdata
-pets[*].<id>.animal.name:   2
-pets[*].<id>.animal.type.*: 2
-pets[*].<id>.type.*:        2
-pets[*].bark:               6
-pets[*].meow:               1
-pets[*].name:               7
-pets[*].speak:              3
-pets[*].type.*:             7
+pets[*].<id>.animal.name  string   2
+pets[*].<id>.animal.type  string   2
+pets[*].<id>.type         string   2
+pets[*].bark              boolean  6
+pets[*].meow              boolean  1
+pets[*].name              string   7
+pets[*].speak             boolean  3
+pets[*].type              string   7
 ```
 
 ## Notes
