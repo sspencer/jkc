@@ -3,8 +3,8 @@
   [
     {
       "name": "Boo",
-      "type": "dog",
-      "bark": true
+      "type": 3,
+      "bark": "ruff"
     }
   ]
 }
