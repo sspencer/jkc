@@ -1,0 +1,20 @@
+{
+  "pets": [
+    {
+      "name": "Penny",
+      "type": "dog",
+      "bark": true,
+      "speak": true
+    },
+    {
+      "name": "Rusty",
+      "type": "dog",
+      "bark": true
+    },
+    {
+      "name": "Persephone",
+      "type": "cat",
+      "meow": true
+    }
+  ]
+}

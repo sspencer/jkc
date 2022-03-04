@@ -1,0 +1,25 @@
+{
+  "pets":
+  [
+    {
+      "name": "Oden",
+      "type": "dog",
+      "bark": true,
+      "speak": true,
+      "c77708f0-86a8-4949-86a7-9614fa79b435": {
+        "type": "uuid",
+        "animal": {
+          "name": "Hooty",
+          "type": "owl"
+        }
+      },
+      "-AWVW3gy0cbUcQJW0Y9t": {
+        "type": "pushid",
+        "animal": {
+          "name": "Hoppy",
+          "type": "frog"
+        }
+      }
+    }
+  ]
+}
