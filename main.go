@@ -72,20 +72,30 @@ func main() {
 	}
 
 	cfg := config{skipKeys: skipKeys, skipIds: *skipIds, skipPartials: skipPartials}
+	var jsonFiles []string
 	for _, dir := range args {
 		if dir[0] != os.PathSeparator {
 			dir = filepath.Join(cwd, dir)
 		}
 
 		if stat, err := os.Stat(dir); err == nil && stat.IsDir() {
-			err = walkDir(dir, countMap, cfg)
+			fileNames, err := walkDir(dir, countMap, cfg)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "ERROR walking directory %q: %s\n", dir, err)
 				os.Exit(1)
+			} else {
+				jsonFiles = append(jsonFiles, fileNames...)
 			}
 		} else {
 			fmt.Fprintf(os.Stderr, "ERROR %q is not a directory\n", dir)
 			os.Exit(1)
+		}
+	}
+
+	fmt.Println("jsonFIles:", jsonFiles)
+	for _, fileName := range jsonFiles {
+		if err := countPaths(fileName, countMap, cfg); err != nil {
+			fmt.Fprintln(os.Stderr, err)
 		}
 	}
 
@@ -100,27 +110,30 @@ func main() {
 }
 
 // recursively walk directory looking for all *.json files
-func walkDir(dir string, countMap map[string]field, cfg config) error {
+func walkDir(dir string, countMap map[string]field, cfg config) ([]string, error) {
 	fileSystem := os.DirFS(dir)
 
-	return fs.WalkDir(fileSystem, ".", func(path string, d fs.DirEntry, err error) error {
+	var fileNames []string
+	err := fs.WalkDir(fileSystem, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
 		if d.Type().IsRegular() && strings.HasSuffix(d.Name(), ".json") {
-			if err = countPaths(filepath.Base(dir), filepath.Join(dir, path), countMap, cfg); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-			}
+
+			fileNames = append(fileNames, filepath.Join(dir, path))
 		}
 
 		return nil
 	})
+
+	return fileNames, err
 }
 
 // read json file, keyCount unique key paths
-func countPaths(dir, path string, countMap map[string]field, cfg config) error {
-	data, err := os.ReadFile(path)
+func countPaths(filePath string, countMap map[string]field, cfg config) error {
+
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return err
 	}
@@ -135,6 +148,8 @@ func countPaths(dir, path string, countMap map[string]field, cfg config) error {
 	if err != nil {
 		return err
 	}
+
+	dir := filepath.Base(filepath.Dir(filePath))
 
 	for keyPath, val := range flat {
 		key := normalizeKeyPath(keyPath, cfg)
