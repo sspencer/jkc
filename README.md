@@ -42,3 +42,5 @@ pets[*].type              string(*)   7
 
 * You may skip more than one key: `jkc -v input -v output dir1 dir2 dir3`
 * If a type ends with (*), it means that the field may have more than one type.
+
+
