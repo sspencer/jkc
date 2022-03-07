@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/Jeffail/gabs/v2"
+	"io"
 	"io/fs"
 	"log"
 	"os"
@@ -21,10 +22,12 @@ type config struct {
 }
 
 type field struct {
-	keyCount  int
-	typeCount map[string]int // count how many times each type appears
-	typeGuess string         // best guess of the type
-	dir       string         // directory name (hint: name it same as "entity")
+	keyCount    int
+	boolCount   int
+	numberCount int
+	stringCount int
+	typeGuess   string // best guess of the type
+	dir         string // directory name (hint: name it same as "entity")
 }
 
 type arrayFlags []string
@@ -86,14 +89,14 @@ func main() {
 		}
 	}
 
+	out := os.Stdout
 	if *csvOut {
-		csvPrint(countMap, ',')
+		csvPrint(out, countMap, ',')
 	} else if *tsvOut {
-		csvPrint(countMap, '\t')
+		csvPrint(out, countMap, '\t')
 	} else {
-		prettyPrint(countMap)
+		prettyPrint(out, countMap)
 	}
-
 }
 
 // recursively walk directory looking for all *.json files
@@ -133,29 +136,24 @@ func countPaths(dir, path string, countMap map[string]field, cfg config) error {
 		return err
 	}
 
-	var typ string
 	for keyPath, val := range flat {
-
-		switch val.(type) {
-		case int:
-		case float64:
-			typ = "number"
-		case string:
-			typ = "string"
-		case bool:
-			typ = "boolean"
-		default:
-			typ = "unknown"
-		}
 		key := normalizeKeyPath(keyPath, cfg)
+
 		if len(key) > 0 {
 			ct := countMap[key]
 			ct.keyCount++
-			if ct.typeCount == nil {
-				ct.typeCount = make(map[string]int)
-			}
-			ct.typeCount[typ]++
 			ct.dir = dir
+
+			switch val.(type) {
+			case int:
+			case float64:
+				ct.numberCount++
+			case string:
+				ct.stringCount++
+			case bool:
+				ct.boolCount++
+			}
+
 			countMap[key] = ct
 		}
 	}
@@ -220,7 +218,7 @@ func looksLikeId(key string) bool {
 }
 
 // Sort map keys and align keyCount based on longest key path
-func prettyPrint(m map[string]field) {
+func prettyPrint(out io.Writer, m map[string]field) {
 	var maxLenKey, maxLenType int
 	guessTypes(m)
 	keys := make([]string, 0, len(m))
@@ -239,14 +237,14 @@ func prettyPrint(m map[string]field) {
 
 	for _, k := range keys {
 		ct := m[k]
-		fmt.Printf("%s%s  %s%s  %d\n", k, strings.Repeat(" ", maxLenKey-len(k)), ct.typeGuess, strings.Repeat(" ", maxLenType-len(ct.typeGuess)), ct.keyCount)
+		fmt.Fprintf(out, "%s%s  %s%s  %d\n", k, strings.Repeat(" ", maxLenKey-len(k)), ct.typeGuess, strings.Repeat(" ", maxLenType-len(ct.typeGuess)), ct.keyCount)
 	}
 }
 
-func csvPrint(m map[string]field, separator rune) {
+func csvPrint(out io.Writer, m map[string]field, separator rune) {
 	guessTypes(m)
 	keys := sortKeys(m)
-	w := csv.NewWriter(os.Stdout)
+	w := csv.NewWriter(out)
 	w.Comma = separator
 	for _, k := range keys {
 		ct := m[k]
@@ -268,30 +266,39 @@ func sortKeys(m map[string]field) []string {
 	return keys
 }
 
-func guessTypes(m map[string]field) {
-	for fieldKey, fieldVal := range m {
-		type kv struct {
+func guessTypes(countMap map[string]field) {
+
+	for key, val := range countMap {
+		type countType struct {
 			typeKey string
 			typeCnt int
 		}
-		var ss []kv
-		for k, v := range fieldVal.typeCount {
-			ss = append(ss, kv{k, v})
+
+		var ss []countType
+		if val.stringCount > 0 {
+			ss = append(ss, countType{"string", val.stringCount})
+		}
+		if val.numberCount > 0 {
+			ss = append(ss, countType{"number", val.numberCount})
+		}
+		if val.boolCount > 0 {
+			ss = append(ss, countType{"boolean", val.boolCount})
 		}
 
 		sort.Slice(ss, func(i, j int) bool {
 			return ss[i].typeCnt > ss[j].typeCnt
 		})
 
-		jk := m[fieldKey]
+		ct := countMap[key]
+
 		if len(ss) == 0 {
-			jk.typeGuess = "unknown"
+			ct.typeGuess = "unknown"
 		} else if len(ss) == 1 {
-			jk.typeGuess = ss[0].typeKey
+			ct.typeGuess = ss[0].typeKey
 		} else {
-			jk.typeGuess = ss[0].typeKey + "(*)"
+			ct.typeGuess = ss[0].typeKey + "(*)"
 		}
 
-		m[fieldKey] = jk
+		countMap[key] = ct
 	}
 }
