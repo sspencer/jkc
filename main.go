@@ -10,9 +10,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 type config struct {
@@ -29,6 +31,8 @@ type field struct {
 	typeGuess   string // best guess of the type
 	dir         string // directory name (hint: name it same as "entity")
 }
+
+type counterMap map[string]field
 
 type arrayFlags []string
 
@@ -64,7 +68,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	countMap := make(map[string]field)
+	//countMap := make(map[string]field)
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -79,7 +83,7 @@ func main() {
 		}
 
 		if stat, err := os.Stat(dir); err == nil && stat.IsDir() {
-			fileNames, err := walkDir(dir, countMap, cfg)
+			fileNames, err := walkDir(dir)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "ERROR walking directory %q: %s\n", dir, err)
 				os.Exit(1)
@@ -92,12 +96,15 @@ func main() {
 		}
 	}
 
-	fmt.Println("jsonFIles:", jsonFiles)
-	for _, fileName := range jsonFiles {
-		if err := countPaths(fileName, countMap, cfg); err != nil {
-			fmt.Fprintln(os.Stderr, err)
+	/*
+		fmt.Println("jsonFIles:", jsonFiles)
+		for _, fileName := range jsonFiles {
+			if err := countPaths(fileName, countMap, cfg); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
 		}
-	}
+	*/
+	countMap := processFiles(jsonFiles, cfg)
 
 	out := os.Stdout
 	if *csvOut {
@@ -110,7 +117,7 @@ func main() {
 }
 
 // recursively walk directory looking for all *.json files
-func walkDir(dir string, countMap map[string]field, cfg config) ([]string, error) {
+func walkDir(dir string) ([]string, error) {
 	fileSystem := os.DirFS(dir)
 
 	var fileNames []string
@@ -131,22 +138,22 @@ func walkDir(dir string, countMap map[string]field, cfg config) ([]string, error
 }
 
 // read json file, keyCount unique key paths
-func countPaths(filePath string, countMap map[string]field, cfg config) error {
-
+func countPaths(filePath string, cfg config) (counterMap, error) {
+	countMap := make(counterMap)
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return err
+		return countMap, err
 	}
 
 	json, err := gabs.ParseJSON(data)
 	if err != nil {
-		return err
+		return countMap, err
 	}
 
 	//flat, err := json.FlattenIncludeEmpty()
 	flat, err := json.Flatten()
 	if err != nil {
-		return err
+		return countMap, err
 	}
 
 	dir := filepath.Base(filepath.Dir(filePath))
@@ -173,7 +180,7 @@ func countPaths(filePath string, countMap map[string]field, cfg config) error {
 		}
 	}
 
-	return nil
+	return countMap, nil
 }
 
 // remove array subscripts
@@ -233,7 +240,7 @@ func looksLikeId(key string) bool {
 }
 
 // Sort map keys and align keyCount based on longest key path
-func prettyPrint(out io.Writer, m map[string]field) {
+func prettyPrint(out io.Writer, m counterMap) {
 	var maxLenKey, maxLenType int
 	guessTypes(m)
 	keys := make([]string, 0, len(m))
@@ -256,7 +263,7 @@ func prettyPrint(out io.Writer, m map[string]field) {
 	}
 }
 
-func csvPrint(out io.Writer, m map[string]field, separator rune) {
+func csvPrint(out io.Writer, m counterMap, separator rune) {
 	guessTypes(m)
 	keys := sortKeys(m)
 	w := csv.NewWriter(out)
@@ -271,7 +278,7 @@ func csvPrint(out io.Writer, m map[string]field, separator rune) {
 	w.Flush()
 }
 
-func sortKeys(m map[string]field) []string {
+func sortKeys(m counterMap) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 
@@ -281,9 +288,9 @@ func sortKeys(m map[string]field) []string {
 	return keys
 }
 
-func guessTypes(countMap map[string]field) {
+func guessTypes(m counterMap) {
 
-	for key, val := range countMap {
+	for key, val := range m {
 		type countType struct {
 			typeKey string
 			typeCnt int
@@ -304,7 +311,7 @@ func guessTypes(countMap map[string]field) {
 			return ss[i].typeCnt > ss[j].typeCnt
 		})
 
-		ct := countMap[key]
+		ct := m[key]
 
 		if len(ss) == 0 {
 			ct.typeGuess = "unknown"
@@ -314,6 +321,54 @@ func guessTypes(countMap map[string]field) {
 			ct.typeGuess = ss[0].typeKey + "(*)"
 		}
 
-		countMap[key] = ct
+		m[key] = ct
 	}
+}
+
+func processFiles(jsonFiles []string, cfg config) counterMap {
+	all := make(counterMap)
+	// short circuit on empty input
+	if len(jsonFiles) == 0 {
+		return all
+	}
+
+	// synchronize writes into output
+	var mutex sync.Mutex
+
+	// create (n) workers
+	sem := make(chan bool, runtime.NumCPU())
+
+	for _, jsonFile := range jsonFiles {
+		sem <- true // blocks after (n)
+
+		go func(inputFile string) {
+			//fn := worker.StringWork(inputFile)
+			m, err := countPaths(inputFile, cfg)
+			if err == nil {
+				mutex.Lock()
+				for k, v := range m {
+					if fields, ok := all[k]; ok {
+						fields.keyCount += v.keyCount
+						fields.boolCount += v.boolCount
+						fields.numberCount += v.numberCount
+						fields.stringCount += v.stringCount
+						fields.dir = v.dir
+						all[k] = fields
+					} else {
+						all[k] = v
+					}
+				}
+				mutex.Unlock()
+			}
+
+			<-sem // release a slot
+		}(jsonFile)
+	}
+
+	// wait until last (n) matches complete
+	for i := 0; i < cap(sem); i++ {
+		sem <- true
+	}
+
+	return all
 }
