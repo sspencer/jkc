@@ -107,7 +107,6 @@ func walkDir(dir string) ([]string, error) {
 		}
 
 		if d.Type().IsRegular() && strings.HasSuffix(d.Name(), ".json") {
-
 			fileNames = append(fileNames, filepath.Join(dir, path))
 		}
 
