@@ -240,25 +240,42 @@ func looksLikeId(key string) bool {
 
 // Sort map keys and align keyCount based on longest key path
 func prettyPrint(out io.Writer, m valueMap) {
-	var maxLenKey, maxLenType int
+	var maxKeyLen, maxTypeLen, maxDirLen int
+	dirCnt := make(map[string]int)
 	guessTypes(m)
 	keys := make([]string, 0, len(m))
 	for k, ct := range m {
-		if len(k) > maxLenKey {
-			maxLenKey = len(k)
+		if len(k) > maxKeyLen {
+			maxKeyLen = len(k)
 		}
 		countLen := len(ct.typeGuess)
-		if countLen > maxLenType {
-			maxLenType = countLen
+		if countLen > maxTypeLen {
+			maxTypeLen = countLen
 		}
 
+		dirCnt[ct.dir]++
+		dirLen := len(ct.dir)
+		if dirLen > maxDirLen {
+			maxDirLen = dirLen
+		}
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 
 	for _, k := range keys {
 		ct := m[k]
-		fmt.Fprintf(out, "%s%s  %s%s  %d\n", k, strings.Repeat(" ", maxLenKey-len(k)), ct.typeGuess, strings.Repeat(" ", maxLenType-len(ct.typeGuess)), ct.keyCount)
+		if len(dirCnt) == 1 {
+			fmt.Fprintf(out, "%s%s  %s%s  %d\n",
+				k, strings.Repeat(" ", maxKeyLen-len(k)),
+				ct.typeGuess, strings.Repeat(" ", maxTypeLen-len(ct.typeGuess)),
+				ct.keyCount)
+		} else {
+			fmt.Fprintf(out, "%s%s  %s%s  %s%s  %d\n",
+				k, strings.Repeat(" ", maxKeyLen-len(k)),
+				ct.typeGuess, strings.Repeat(" ", maxTypeLen-len(ct.typeGuess)),
+				ct.dir, strings.Repeat(" ", maxDirLen-len(ct.dir)),
+				ct.keyCount)
+		}
 	}
 }
 
