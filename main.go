@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type config struct {
@@ -23,7 +25,7 @@ type config struct {
 	skipIds      bool
 }
 
-type field struct {
+type jsonValue struct {
 	keyCount    int
 	boolCount   int
 	numberCount int
@@ -32,7 +34,7 @@ type field struct {
 	dir         string // directory name (hint: name it same as "entity")
 }
 
-type counterMap map[string]field
+type valueMap map[string]jsonValue
 
 type arrayFlags []string
 
@@ -47,7 +49,9 @@ func (i *arrayFlags) Set(value string) error {
 
 // print dotted path for each json key
 func main() {
+	rand.Seed(time.Now().UnixNano())
 	var skipKeys, skipPartials arrayFlags
+
 	flag.Var(&skipKeys, "v", "skip this \"key\" (invert match)")                    // can specify more than once
 	flag.Var(&skipPartials, "p", "skip \"key\" with this substring (invert match)") // can specify more than once
 	skipIds := flag.Bool("i", false, "skip keys that looks like push ids or uuids")
@@ -68,27 +72,25 @@ func main() {
 		os.Exit(1)
 	}
 
-	//countMap := make(map[string]field)
-
 	cwd, err := os.Getwd()
 	if err != nil {
 		panic(err)
 	}
 
 	cfg := config{skipKeys: skipKeys, skipIds: *skipIds, skipPartials: skipPartials}
-	var jsonFiles []string
+	var allFiles []string
 	for _, dir := range args {
 		if dir[0] != os.PathSeparator {
 			dir = filepath.Join(cwd, dir)
 		}
 
 		if stat, err := os.Stat(dir); err == nil && stat.IsDir() {
-			fileNames, err := walkDir(dir)
+			jsonFiles, err := walkDir(dir)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "ERROR walking directory %q: %s\n", dir, err)
 				os.Exit(1)
 			} else {
-				jsonFiles = append(jsonFiles, fileNames...)
+				allFiles = append(allFiles, jsonFiles...)
 			}
 		} else {
 			fmt.Fprintf(os.Stderr, "ERROR %q is not a directory\n", dir)
@@ -96,15 +98,13 @@ func main() {
 		}
 	}
 
-	/*
-		fmt.Println("jsonFIles:", jsonFiles)
-		for _, fileName := range jsonFiles {
-			if err := countPaths(fileName, countMap, cfg); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-			}
-		}
-	*/
-	countMap := processFiles(jsonFiles, cfg)
+	// shuffle files so parsing them in parallel bias one thread with larger filesize
+	rand.Shuffle(len(allFiles), func(i, j int) {
+		allFiles[i], allFiles[j] = allFiles[j], allFiles[i]
+	})
+
+	// files are distributed in equally sized chunks to process (one goroutine per cpu),
+	countMap := processFiles(allFiles, cfg)
 
 	out := os.Stdout
 	if *csvOut {
@@ -137,23 +137,22 @@ func walkDir(dir string) ([]string, error) {
 	return fileNames, err
 }
 
-// read json file, keyCount unique key paths
-func countPaths(filePath string, cfg config) (counterMap, error) {
-	countMap := make(counterMap)
+// parse single json file
+func countPaths(filePath string, m valueMap, cfg config) error {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return countMap, err
+		return err
 	}
 
 	json, err := gabs.ParseJSON(data)
 	if err != nil {
-		return countMap, err
+		return err
 	}
 
 	//flat, err := json.FlattenIncludeEmpty()
 	flat, err := json.Flatten()
 	if err != nil {
-		return countMap, err
+		return err
 	}
 
 	dir := filepath.Base(filepath.Dir(filePath))
@@ -162,7 +161,7 @@ func countPaths(filePath string, cfg config) (counterMap, error) {
 		key := normalizeKeyPath(keyPath, cfg)
 
 		if len(key) > 0 {
-			ct := countMap[key]
+			ct := m[key]
 			ct.keyCount++
 			ct.dir = dir
 
@@ -176,11 +175,11 @@ func countPaths(filePath string, cfg config) (counterMap, error) {
 				ct.boolCount++
 			}
 
-			countMap[key] = ct
+			m[key] = ct
 		}
 	}
 
-	return countMap, nil
+	return nil
 }
 
 // remove array subscripts
@@ -240,7 +239,7 @@ func looksLikeId(key string) bool {
 }
 
 // Sort map keys and align keyCount based on longest key path
-func prettyPrint(out io.Writer, m counterMap) {
+func prettyPrint(out io.Writer, m valueMap) {
 	var maxLenKey, maxLenType int
 	guessTypes(m)
 	keys := make([]string, 0, len(m))
@@ -263,7 +262,7 @@ func prettyPrint(out io.Writer, m counterMap) {
 	}
 }
 
-func csvPrint(out io.Writer, m counterMap, separator rune) {
+func csvPrint(out io.Writer, m valueMap, separator rune) {
 	guessTypes(m)
 	keys := sortKeys(m)
 	w := csv.NewWriter(out)
@@ -278,7 +277,7 @@ func csvPrint(out io.Writer, m counterMap, separator rune) {
 	w.Flush()
 }
 
-func sortKeys(m counterMap) []string {
+func sortKeys(m valueMap) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 
@@ -288,7 +287,7 @@ func sortKeys(m counterMap) []string {
 	return keys
 }
 
-func guessTypes(m counterMap) {
+func guessTypes(m valueMap) {
 
 	for key, val := range m {
 		type countType struct {
@@ -325,50 +324,76 @@ func guessTypes(m counterMap) {
 	}
 }
 
-func processFiles(jsonFiles []string, cfg config) counterMap {
-	all := make(counterMap)
+func processFiles(jsonFiles []string, cfg config) valueMap {
+	all := make(valueMap)
 	// short circuit on empty input
 	if len(jsonFiles) == 0 {
 		return all
 	}
 
-	// synchronize writes into output
-	var mutex sync.Mutex
+	cpus := runtime.NumCPU()
+	chunks := splitSlice(jsonFiles, cpus)
+	var counters []valueMap
 
-	// create (n) workers
-	sem := make(chan bool, runtime.NumCPU())
-
-	for _, jsonFile := range jsonFiles {
-		sem <- true // blocks after (n)
-
-		go func(inputFile string) {
-			//fn := worker.StringWork(inputFile)
-			m, err := countPaths(inputFile, cfg)
-			if err == nil {
-				mutex.Lock()
-				for k, v := range m {
-					if fields, ok := all[k]; ok {
-						fields.keyCount += v.keyCount
-						fields.boolCount += v.boolCount
-						fields.numberCount += v.numberCount
-						fields.stringCount += v.stringCount
-						fields.dir = v.dir
-						all[k] = fields
-					} else {
-						all[k] = v
-					}
+	wg := sync.WaitGroup{}
+	for i := 0; i < cpus; i++ {
+		counters = append(counters, make(valueMap))
+		wg.Add(1)
+		go func(files []string, m valueMap) {
+			for _, f := range files {
+				if err := countPaths(f, m, cfg); err != nil {
+					fmt.Fprintln(os.Stderr, err)
 				}
-				mutex.Unlock()
 			}
-
-			<-sem // release a slot
-		}(jsonFile)
+			wg.Done()
+		}(chunks[i], counters[i])
 	}
+	wg.Wait()
 
-	// wait until last (n) matches complete
-	for i := 0; i < cap(sem); i++ {
-		sem <- true
+	for i := 0; i < cpus; i++ {
+		for k, v := range counters[i] {
+			if fields, ok := all[k]; ok {
+				fields.keyCount += v.keyCount
+				fields.boolCount += v.boolCount
+				fields.numberCount += v.numberCount
+				fields.stringCount += v.stringCount
+				fields.dir = v.dir
+				all[k] = fields
+			} else {
+				all[k] = v
+			}
+		}
 	}
 
 	return all
+}
+
+// splitSlice splits a slice in `numberOfChunks` slices.
+//
+// Based on this gist: https://gist.github.com/siscia/988bf4523918345a6a8285b32e685e03
+//
+func splitSlice(array []string, numberOfChunks int) [][]string {
+	if len(array) == 0 {
+		return nil
+	}
+
+	result := make([][]string, numberOfChunks)
+
+	if numberOfChunks > len(array) {
+		for i := 0; i < len(array); i++ {
+			result[i] = []string{array[i]}
+		}
+		return result
+	}
+
+	for i := 0; i < numberOfChunks; i++ {
+
+		min := i * len(array) / numberOfChunks
+		max := ((i + 1) * len(array)) / numberOfChunks
+
+		result[i] = array[min:max]
+
+	}
+
+	return result
 }
