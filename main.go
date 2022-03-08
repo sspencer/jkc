@@ -59,6 +59,7 @@ func main() {
 	counter := cnt.NewCounter(skipKeys, skipPartials, *skipIds)
 	var allFiles []string
 
+	// read multiple directories from input args
 	for _, dir := range args {
 		if dir[0] != os.PathSeparator {
 			dir = filepath.Join(cwd, dir)
@@ -78,12 +79,12 @@ func main() {
 		}
 	}
 
-	// shuffle files so parsing them in parallel bias one thread with larger filesize
+	// shuffle files so concurrent processes are more likely getting an equal mix of file sizes
 	rand.Shuffle(len(allFiles), func(i, j int) {
 		allFiles[i], allFiles[j] = allFiles[j], allFiles[i]
 	})
 
-	// files are distributed in equally sized chunks to process (one goroutine per cpu),
+	// concurrent, allFiles broken into chunks (one goroutine per cpu),
 	counter.CountFiles(allFiles)
 
 	out := os.Stdout
