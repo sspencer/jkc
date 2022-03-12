@@ -50,12 +50,25 @@ func partialCounter(c *Counter) *Counter {
 
 // CountFiles reads JSON files and counts the number of times each json key path appears.a
 func (c *Counter) CountFiles(jsonFiles []string) {
+	numFiles := len(jsonFiles)
 
-	// short circuit on empty input
-	if len(jsonFiles) == 0 {
+	if numFiles == 0 {
+		return
+	} else if numFiles >= 120 {
+		c.multiCountFiles(jsonFiles)
 		return
 	}
 
+	// single threaded
+	for _, f := range jsonFiles {
+		if err := c.countFile(f); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+	}
+}
+
+// multiCountFiles breaks input files into equally sized chunks and counts the keypaths concurrently.
+func (c *Counter) multiCountFiles(jsonFiles []string) {
 	cpus := runtime.NumCPU()
 	chunks := splitSlice(jsonFiles, cpus)
 	var counters []*Counter
